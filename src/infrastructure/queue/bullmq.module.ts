@@ -3,7 +3,6 @@ import { Module } from '@nestjs/common';
 
 import { AnalyticsWorker } from '../../jobs/workers/analytics.worker';
 import { DocumentsWorker } from '../../jobs/workers/documents.worker';
-import { NotificationsWorker } from '../../jobs/workers/notifications.worker';
 import { SearchIndexWorker } from '../../jobs/workers/search-index.worker';
 import { OutboxRelayWorker } from '../messaging/outbox/outbox.relay.worker';
 
@@ -18,13 +17,7 @@ import { OutboxRelayWorker } from '../messaging/outbox/outbox.relay.worker';
       { name: 'payments-webhooks' },
     ),
   ],
-  providers: [
-    NotificationsWorker,
-    SearchIndexWorker,
-    DocumentsWorker,
-    AnalyticsWorker,
-    OutboxRelayWorker,
-  ],
+  providers: [SearchIndexWorker, DocumentsWorker, AnalyticsWorker, OutboxRelayWorker],
   exports: [BullModule],
 })
 export class QueueModule {}

@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { envConfig } from '../../src/config/env.config';
 import { AuthService } from '../../src/modules/auth/application/auth.service';
 import { AuthRepository } from '../../src/modules/auth/infrastructure/persistence/auth.repository';
+import { NotificationsService } from '../../src/modules/notifications/application/notifications.service';
 
 describe('AuthService', () => {
   it('generates access and refresh tokens', async () => {
@@ -17,6 +18,7 @@ describe('AuthService', () => {
       | 'findUserById'
       | 'findActiveSession'
       | 'revokeSession'
+      | 'createEmailVerificationToken'
     > = {
       findUserByEmail: async () => ({
         id: 'user-1',
@@ -45,6 +47,10 @@ describe('AuthService', () => {
         createdAt: new Date(),
       }),
       revokeSession: async () => undefined,
+      createEmailVerificationToken: async () => undefined,
+    };
+    const notificationsServiceMock: Pick<NotificationsService, 'sendEmailConfirmation'> = {
+      sendEmailConfirmation: async () => undefined,
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -54,6 +60,10 @@ describe('AuthService', () => {
         {
           provide: AuthRepository,
           useValue: authRepositoryMock,
+        },
+        {
+          provide: NotificationsService,
+          useValue: notificationsServiceMock,
         },
         {
           provide: envConfig.KEY,

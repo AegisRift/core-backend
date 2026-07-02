@@ -1,4 +1,14 @@
-import { boolean, date, index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  date,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 export const authUsers = pgTable(
   'auth_users',
@@ -16,11 +26,50 @@ export const authUsers = pgTable(
     userType: text('user_type').notNull().default('buyer'),
     preferredContactMethod: text('preferred_contact_method').notNull().default('whatsapp'),
     isPhoneVerified: boolean('is_phone_verified').notNull().default(false),
+    isEmailVerified: boolean('is_email_verified').notNull().default(false),
+    emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
     isActive: boolean('is_active').notNull().default(true),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('idx_auth_users_email').on(table.email)],
+);
+
+export const emailVerificationTokens = pgTable(
+  'email_verification_tokens',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: text('user_id').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_email_verification_tokens_user').on(table.userId),
+    index('idx_email_verification_tokens_token_hash').on(table.tokenHash),
+  ],
+);
+
+export const authChallenges = pgTable(
+  'auth_challenges',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: text('user_id').notNull(),
+    purpose: text('purpose').notNull(),
+    channel: text('channel').notNull(),
+    codeHash: text('code_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(5),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_auth_challenges_user').on(table.userId),
+    index('idx_auth_challenges_purpose').on(table.purpose),
+  ],
 );
 
 export const authSessions = pgTable(
