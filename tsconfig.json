@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2023",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "paths": {
+      "@app/*": ["src/*"],
+      "@auth/*": ["src/modules/auth/*"],
+      "@auth-core/*": ["src/auth/*"],
+      "@common/*": ["src/common/*"],
+      "@config/*": ["src/config/*"],
+      "@dto/*": ["src/modules/auth/api/http/dto/*"],
+      "@events/*": ["src/events/*"],
+      "@infrastructure/*": ["src/infrastructure/*"],
+      "@jobs/*": ["src/jobs/*"],
+      "@modules/*": ["src/modules/*"],
+      "@observability/*": ["src/observability/*"],
+      "@realtime/*": ["src/realtime/*"],
+      "@shared/*": ["src/shared/*"]
+    },
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "noFallthroughCasesInSwitch": false
+  }
+}
