@@ -2,13 +2,17 @@ import { faker } from '@faker-js/faker';
 import { JwtService } from '@nestjs/jwt';
 
 import { envConfig } from '../../src/config/env.config';
+import { AnalyticsService } from '../../src/modules/analytics/application/analytics.service';
+import { BehaviorEventsConsumer } from '../../src/modules/analytics/application/behavior-events.consumer';
 import { AuthService } from '../../src/modules/auth/application/auth.service';
 import { ListingsService } from '../../src/modules/listings/application/listings.service';
-import { PropertiesService } from '../../src/modules/properties/application/properties.service';
 import { NotificationsService } from '../../src/modules/notifications/application/notifications.service';
+import { PropertiesService } from '../../src/modules/properties/application/properties.service';
+import { SearchService } from '../../src/modules/search/application/search.service';
+import { DomainEvent } from '../../src/shared/domain/events/domain-event';
 
 describe('Real estate simulated flow', () => {
-  it('registra dos usuarios y el segundo encuentra el listing en su feed', async () => {
+  it('publica propiedad y listing, busca con filtros y genera insights de comportamiento', async () => {
     const logStep = (step: number, message: string, payload?: unknown) => {
       if (payload !== undefined) {
         console.log(`[SIM_FLOW][STEP ${step}] ${message}`, payload);
@@ -43,39 +47,54 @@ describe('Real estate simulated flow', () => {
       createdAt: Date;
     }> = [];
 
-    const properties: Array<{
+    interface PropertyRecord {
       id: string;
       advertiserUserId: string;
+      status: 'draft' | 'published' | 'archived';
       operationType: 'rent' | 'buy';
+      developerId?: string;
       bedrooms: number;
+      bathrooms: number;
+      furnished: boolean;
+      cost: string;
+      amenities: string[];
       availability: 'unavailable' | 'available_soon' | 'available_on_date' | 'available';
-      mapLocation: { lat: number; lng: number; city?: string; country?: string };
+      mapLocation: { lat: number; lng: number; address?: string; city: string; country: string };
+      publishedAt: Date | null;
+      metadata: Record<string, unknown>;
       [k: string]: unknown;
-    }> = [];
+    }
 
-    const listings: Array<{
+    interface ListingRecord {
       id: string;
       propertyId: string;
-      status: 'available' | 'paused';
+      title: string;
+      summary: string | null;
+      status: 'draft' | 'published' | 'paused' | 'closed';
+      dealType: 'direct_owner' | 'owner_administrator' | 'real_estate_agency' | 'developer';
       price: string;
+      publishedAt: Date | null;
+      deactivatedAt: Date | null;
       viewsCount: number;
       savesCount: number;
       leadsCount: number;
+      visitsScheduledCount: number;
       applicationsCount: number;
+      chatMessagesCount: number;
+      metadata: Record<string, unknown>;
       [k: string]: unknown;
-    }> = [];
+    }
 
-    const searchHistory: Array<{
-      userId: string;
-      operationType?: string;
-      country?: string;
-      city?: string;
-      distanceRangeKm?: string;
-      userLat?: string;
-      userLng?: string;
-      minPrice?: string;
-      maxPrice?: string;
-    }> = [];
+    const propertyRecords: PropertyRecord[] = [];
+    const listingRecords: ListingRecord[] = [];
+    const outboxEvents: DomainEvent[] = [];
+    const searchHistory: Array<Record<string, unknown>> = [];
+
+    const collectEvents = <T>(factory: ((row: T) => DomainEvent[]) | undefined, row: T) => {
+      for (const event of factory?.(row) ?? []) {
+        outboxEvents.push(event);
+      }
+    };
 
     const authRepository = {
       findUserByEmail: jest.fn(
@@ -153,62 +172,122 @@ describe('Real estate simulated flow', () => {
       createEmailVerificationToken: jest.fn(async () => undefined),
     };
 
+    const propertyVisibleTo = (property: PropertyRecord, viewerUserId?: string) => {
+      if (property.status !== 'published') {
+        return viewerUserId !== undefined && property.advertiserUserId === viewerUserId;
+      }
+      return property.availability !== 'unavailable';
+    };
+
     const propertiesRepository = {
       create: jest.fn(
         async (
-          input: Record<string, unknown> & {
-            mapLocation?: {
-              lat: number;
-              lng: number;
-              address?: string;
-              city?: string;
-              country?: string;
-            };
-          },
+          input: Record<string, unknown>,
+          eventsFactory?: (row: PropertyRecord) => DomainEvent[],
         ) => {
-          const row = { id: faker.string.uuid(), ...input };
-          properties.push(row as (typeof properties)[number]);
+          const row = {
+            id: faker.string.uuid(),
+            status: 'draft',
+            publishedAt: null,
+            metadata: {},
+            ...input,
+            cost: String(input.cost),
+          } as PropertyRecord;
+          propertyRecords.push(row);
+          collectEvents(eventsFactory, row);
           return row;
         },
       ),
-      findAllVisible: jest.fn(async () => [...properties]),
-      findByIdVisible: jest.fn(
-        async (propertyId: string) => properties.find((p) => p.id === propertyId) ?? null,
+      findById: jest.fn(
+        async (propertyId: string) => propertyRecords.find((p) => p.id === propertyId) ?? null,
+      ),
+      findAllVisible: jest.fn(async (viewerUserId?: string) =>
+        propertyRecords.filter((p) => propertyVisibleTo(p, viewerUserId)),
+      ),
+      findByIdVisible: jest.fn(async (propertyId: string, viewerUserId?: string) => {
+        const property = propertyRecords.find((p) => p.id === propertyId);
+        if (!property || !propertyVisibleTo(property, viewerUserId)) return null;
+        return property;
+      }),
+      publish: jest.fn(
+        async (propertyId: string, eventsFactory?: (row: PropertyRecord) => DomainEvent[]) => {
+          const property = propertyRecords.find((p) => p.id === propertyId);
+          if (!property || property.status !== 'draft') return null;
+          property.status = 'published';
+          property.publishedAt = new Date();
+          collectEvents(eventsFactory, property);
+          return property;
+        },
       ),
       update: jest.fn(async (propertyId: string, body: Record<string, unknown>) => {
-        const property = properties.find((p) => p.id === propertyId);
+        const property = propertyRecords.find((p) => p.id === propertyId);
         if (!property) return null;
         Object.assign(property, body);
         return property;
       }),
       remove: jest.fn(async (propertyId: string) => {
-        const idx = properties.findIndex((p) => p.id === propertyId);
-        if (idx >= 0) properties.splice(idx, 1);
+        const idx = propertyRecords.findIndex((p) => p.id === propertyId);
+        if (idx >= 0) propertyRecords.splice(idx, 1);
       }),
-      registerVisit: jest.fn(async () => undefined),
+      registerVisit: jest.fn(
+        async (_propertyId: string, _userId: string, eventsFactory?: () => DomainEvent[]) => {
+          collectEvents(eventsFactory as never, undefined as never);
+        },
+      ),
       changeAvailability: jest.fn(
-        async (input: {
-          propertyId: string;
-          toStatus: (typeof properties)[number]['availability'];
-        }) => {
-          const property = properties.find((p) => p.id === input.propertyId);
+        async (
+          input: { propertyId: string; toStatus: PropertyRecord['availability'] },
+          eventsFactory?: (row: PropertyRecord) => DomainEvent[],
+        ) => {
+          const property = propertyRecords.find((p) => p.id === input.propertyId);
           if (!property) return null;
           property.availability = input.toStatus;
+          if (input.toStatus === 'unavailable') {
+            listingRecords
+              .filter((l) => l.propertyId === property.id && l.status === 'published')
+              .forEach((l) => {
+                l.status = 'paused';
+                l.deactivatedAt = new Date();
+              });
+          }
+          collectEvents(eventsFactory, property);
           return property;
         },
       ),
     };
 
+    const listingAvailable = (listing: ListingRecord) => {
+      const property = propertyRecords.find((p) => p.id === listing.propertyId);
+      return Boolean(
+        property &&
+        listing.status === 'published' &&
+        property.status === 'published' &&
+        property.availability !== 'unavailable',
+      );
+    };
+
     const listingsRepository = {
       create: jest.fn(
-        async (input: { propertyId: string; title: string; summary?: string; price: number }) => {
-          const row = {
+        async (
+          input: {
+            propertyId: string;
+            title: string;
+            summary?: string;
+            dealType: ListingRecord['dealType'];
+            price: number;
+          },
+          eventsFactory?: (row: ListingRecord) => DomainEvent[],
+        ) => {
+          const row: ListingRecord = {
             id: faker.string.uuid(),
             propertyId: input.propertyId,
             title: input.title,
             summary: input.summary ?? null,
-            status: 'available' as const,
+            status: 'draft',
+            dealType: input.dealType,
             price: String(input.price),
+            publishedAt: null,
+            deactivatedAt: null,
             viewsCount: 0,
             savesCount: 0,
             leadsCount: 0,
@@ -217,50 +296,106 @@ describe('Real estate simulated flow', () => {
             chatMessagesCount: 0,
             metadata: {},
           };
-          listings.push(row);
+          listingRecords.push(row);
+          collectEvents(eventsFactory, row);
           return row;
         },
       ),
       findAllAvailable: jest.fn(async () =>
-        listings
-          .filter((l) => l.status === 'available')
-          .map((listing) => {
-            const property = properties.find((p) => p.id === listing.propertyId);
-            return property ? { listing, property } : null;
-          })
-          .filter(
-            (
-              row,
-            ): row is {
-              listing: (typeof listings)[number];
-              property: (typeof properties)[number];
-            } => row !== null,
-          ),
+        listingRecords.filter(listingAvailable).map((listing) => ({
+          listing,
+          property: propertyRecords.find((p) => p.id === listing.propertyId)!,
+        })),
       ),
-      findByIdAvailable: jest.fn(async (listingId: string) => {
-        const listing = listings.find((l) => l.id === listingId && l.status === 'available');
+      findById: jest.fn(
+        async (listingId: string) => listingRecords.find((l) => l.id === listingId) ?? undefined,
+      ),
+      findPropertyById: jest.fn(
+        async (propertyId: string) => propertyRecords.find((p) => p.id === propertyId) ?? null,
+      ),
+      findByIdWithProperty: jest.fn(async (listingId: string) => {
+        const listing = listingRecords.find((l) => l.id === listingId);
         if (!listing) return null;
-        const property = properties.find((p) => p.id === listing.propertyId);
+        const property = propertyRecords.find((p) => p.id === listing.propertyId);
         return property ? { listing, property } : null;
       }),
+      findByIdAvailable: jest.fn(async (listingId: string) => {
+        const listing = listingRecords.find((l) => l.id === listingId);
+        if (!listing || !listingAvailable(listing)) return null;
+        return {
+          listing,
+          property: propertyRecords.find((p) => p.id === listing.propertyId)!,
+        };
+      }),
       update: jest.fn(async (listingId: string, body: Record<string, unknown>) => {
-        const listing = listings.find((l) => l.id === listingId);
+        const listing = listingRecords.find((l) => l.id === listingId);
         if (!listing) return null;
         Object.assign(listing, body);
         return listing;
       }),
       remove: jest.fn(async (listingId: string) => {
-        const idx = listings.findIndex((l) => l.id === listingId);
-        if (idx >= 0) listings.splice(idx, 1);
+        const idx = listingRecords.findIndex((l) => l.id === listingId);
+        if (idx >= 0) listingRecords.splice(idx, 1);
       }),
-      changeStatus: jest.fn(async (listingId: string, status: 'available' | 'paused') => {
-        const listing = listings.find((l) => l.id === listingId);
-        if (!listing) return null;
-        listing.status = status;
-        return listing;
-      }),
+      publish: jest.fn(
+        async (listingId: string, eventsFactory?: (row: ListingRecord) => DomainEvent[]) => {
+          const listing = listingRecords.find((l) => l.id === listingId);
+          if (!listing || (listing.status !== 'draft' && listing.status !== 'paused')) return null;
+          listing.status = 'published';
+          listing.publishedAt = new Date();
+          listing.deactivatedAt = null;
+          collectEvents(eventsFactory, listing);
+          return listing;
+        },
+      ),
+      changeStatus: jest.fn(
+        async (
+          listingId: string,
+          status: 'published' | 'paused' | 'closed',
+          eventsFactory?: (row: ListingRecord) => DomainEvent[],
+        ) => {
+          const listing = listingRecords.find((l) => l.id === listingId);
+          if (!listing) return null;
+          listing.status = status;
+          listing.deactivatedAt = status === 'paused' || status === 'closed' ? new Date() : null;
+          collectEvents(eventsFactory, listing);
+          return listing;
+        },
+      ),
+      trackAnalyticsEvent: jest.fn(
+        async (
+          listingId: string,
+          input: { eventType: string; value: number },
+          events?: DomainEvent[],
+        ) => {
+          const listing = listingRecords.find((l) => l.id === listingId);
+          if (!listing) return null;
+          if (input.eventType === 'view') listing.viewsCount += input.value;
+          if (input.eventType === 'save') listing.savesCount += input.value;
+          if (input.eventType === 'lead') listing.leadsCount += input.value;
+          for (const event of events ?? []) {
+            outboxEvents.push(event);
+          }
+          return listing;
+        },
+      ),
+      trackListingView: jest.fn(
+        async (
+          listingId: string,
+          _input: { actorUserId?: string; source: string },
+          events?: DomainEvent[],
+        ) => {
+          const listing = listingRecords.find((l) => l.id === listingId);
+          if (!listing) return null;
+          listing.viewsCount += 1;
+          for (const event of events ?? []) {
+            outboxEvents.push(event);
+          }
+          return listing;
+        },
+      ),
       getAnalytics: jest.fn(async (listingId: string) => {
-        const listing = listings.find((l) => l.id === listingId);
+        const listing = listingRecords.find((l) => l.id === listingId);
         if (!listing) return null;
         return {
           listingId,
@@ -268,81 +403,119 @@ describe('Real estate simulated flow', () => {
             views: listing.viewsCount,
             saves: listing.savesCount,
             leads: listing.leadsCount,
-            visitsScheduled: 0,
+            visitsScheduled: listing.visitsScheduledCount,
             applications: listing.applicationsCount,
-            chatMessages: 0,
+            chatMessages: listing.chatMessagesCount,
           },
           lastInteractionAt: null,
           recentEvents: [],
         };
       }),
-      getFeedCandidates: jest.fn(
-        async (filters?: {
+    };
+
+    const searchRepository = {
+      searchListings: jest.fn(
+        async (filters: {
+          q?: string;
           operationType?: string;
+          dealType?: string;
+          developerId?: string;
+          furnished?: boolean;
           minPrice?: number;
           maxPrice?: number;
-          country?: string;
-          city?: string;
           bedrooms?: number;
-        }) =>
-          (await listingsRepository.findAllAvailable()).filter((row) => {
-            const price = Number(row.listing.price);
-            const country = String(row.property.mapLocation.country ?? '').toLowerCase();
-            const city = String(row.property.mapLocation.city ?? '').toLowerCase();
-            if (filters?.operationType && row.property.operationType !== filters.operationType)
-              return false;
-            if (filters?.minPrice !== undefined && price < filters.minPrice) return false;
-            if (filters?.maxPrice !== undefined && price > filters.maxPrice) return false;
-            if (filters?.country && country !== filters.country.toLowerCase()) return false;
-            if (filters?.city && city !== filters.city.toLowerCase()) return false;
-            if (filters?.bedrooms !== undefined && row.property.bedrooms < filters.bedrooms)
-              return false;
-            return true;
-          }),
-      ),
-      getUserProfile: jest.fn(async (userId: string) => {
-        const user = users.find((u) => u.id === userId);
-        return user ? { userType: user.userType, country: user.country } : null;
-      }),
-      getRecentSearchHistory: jest.fn(async (userId: string) =>
-        searchHistory
-          .filter((item) => item.userId === userId)
-          .slice(-20)
-          .reverse(),
-      ),
-      recordSearchHistory: jest.fn(
-        async (input: {
-          userId: string;
-          queryText?: string;
-          operationType?: string;
-          country?: string;
+          bathrooms?: number;
           city?: string;
-          minPrice?: number;
-          maxPrice?: number;
-          distanceRangeKm?: number;
-          userLat?: number;
-          userLng?: number;
+          country?: string;
+          page?: number;
+          pageSize?: number;
         }) => {
-          searchHistory.push({
-            userId: input.userId,
-            operationType: input.operationType,
-            country: input.country,
-            city: input.city,
-            minPrice: input.minPrice !== undefined ? String(input.minPrice) : undefined,
-            maxPrice: input.maxPrice !== undefined ? String(input.maxPrice) : undefined,
-            distanceRangeKm:
-              input.distanceRangeKm !== undefined ? String(input.distanceRangeKm) : undefined,
-            userLat: input.userLat !== undefined ? String(input.userLat) : undefined,
-            userLng: input.userLng !== undefined ? String(input.userLng) : undefined,
-          });
+          const items = listingRecords
+            .filter(listingAvailable)
+            .map((listing) => ({
+              listing,
+              property: propertyRecords.find((p) => p.id === listing.propertyId)!,
+              distanceKm: null as number | null,
+            }))
+            .filter(({ listing, property }) => {
+              const price = Number(listing.price);
+              if (filters.operationType && property.operationType !== filters.operationType)
+                return false;
+              if (filters.dealType && listing.dealType !== filters.dealType) return false;
+              if (filters.developerId && property.developerId !== filters.developerId) return false;
+              if (filters.furnished !== undefined && property.furnished !== filters.furnished)
+                return false;
+              if (filters.minPrice !== undefined && price < filters.minPrice) return false;
+              if (filters.maxPrice !== undefined && price > filters.maxPrice) return false;
+              if (filters.bedrooms !== undefined && property.bedrooms < filters.bedrooms)
+                return false;
+              if (filters.bathrooms !== undefined && Number(property.bathrooms) < filters.bathrooms)
+                return false;
+              if (
+                filters.city &&
+                property.mapLocation.city.toLowerCase() !== filters.city.toLowerCase()
+              )
+                return false;
+              if (
+                filters.country &&
+                property.mapLocation.country.toLowerCase() !== filters.country.toLowerCase()
+              )
+                return false;
+              if (
+                filters.q &&
+                !`${listing.title} ${listing.summary ?? ''}`
+                  .toLowerCase()
+                  .includes(filters.q.toLowerCase())
+              )
+                return false;
+              return true;
+            });
+          return {
+            items,
+            total: items.length,
+            page: filters.page ?? 1,
+            pageSize: filters.pageSize ?? 20,
+          };
         },
       ),
-      trackListingView: jest.fn(async (listingId: string) => {
-        const listing = listings.find((l) => l.id === listingId);
-        if (!listing) return null;
-        listing.viewsCount += 1;
-        return listing;
+      recordSearchHistory: jest.fn(async (input: Record<string, unknown>) => {
+        searchHistory.push(input);
       }),
+      getRecentSearchHistory: jest.fn(async (userId: string) =>
+        searchHistory.filter((item) => item.userId === userId),
+      ),
+    };
+
+    const searchOutbox = {
+      add: jest.fn(async (event: DomainEvent) => {
+        outboxEvents.push(event);
+      }),
+    };
+
+    const behaviorEvents: Array<{
+      userId: string;
+      eventType: string;
+      entityType: string;
+      entityId?: string;
+      payload: Record<string, unknown>;
+      occurredAt: Date;
+    }> = [];
+    const materializedInsights = new Map<string, Record<string, unknown>>();
+
+    const behaviorRepository = {
+      recordEvent: jest.fn(async (input: (typeof behaviorEvents)[number]) => {
+        behaviorEvents.push(input);
+      }),
+      getDistinctUserIds: jest.fn(async () => [
+        ...new Set(behaviorEvents.map((event) => event.userId)),
+      ]),
+      getRecentEventsByUser: jest.fn(async (userId: string) =>
+        behaviorEvents.filter((event) => event.userId === userId),
+      ),
+      upsertInsights: jest.fn(async (input: { userId: string } & Record<string, unknown>) => {
+        materializedInsights.set(input.userId, input);
+      }),
+      getInsights: jest.fn(async (userId: string) => materializedInsights.get(userId) ?? null),
     };
 
     const notificationsService = {
@@ -358,6 +531,9 @@ describe('Real estate simulated flow', () => {
     );
     const propertiesService = new PropertiesService(propertiesRepository as never);
     const listingsService = new ListingsService(listingsRepository as never);
+    const searchService = new SearchService(searchRepository as never, searchOutbox as never);
+    const behaviorConsumer = new BehaviorEventsConsumer(behaviorRepository as never);
+    const analyticsService = new AnalyticsService(behaviorRepository as never);
 
     const ownerEmail = faker.internet.email().toLowerCase();
     const seekerEmail = faker.internet.email().toLowerCase();
@@ -403,6 +579,14 @@ describe('Real estate simulated flow', () => {
       ipAddress: '10.10.10.11',
     });
 
+    const owner = users.find((u) => u.email === ownerEmail);
+    const seeker = users.find((u) => u.email === seekerEmail);
+    expect(owner).toBeDefined();
+    expect(seeker).toBeDefined();
+    if (!owner || !seeker) {
+      throw new Error('No se pudieron resolver usuarios luego del registro');
+    }
+
     logStep(3, 'Login de anunciante');
     const ownerLogin = await authService.login({
       email: ownerEmail,
@@ -413,57 +597,56 @@ describe('Real estate simulated flow', () => {
       userAgent: 'jest',
       ipAddress: '10.10.10.12',
     });
-    logStep(4, 'Login anunciante correcto (tokens generados)', {
-      hasAccessToken: Boolean(ownerLogin.accessToken),
-      hasRefreshToken: Boolean(ownerLogin.refreshToken),
-    });
+    expect(ownerLogin.accessToken).toBeDefined();
 
-    const owner = users.find((u) => u.email === ownerEmail);
-    const seeker = users.find((u) => u.email === seekerEmail);
-    expect(owner).toBeDefined();
-    expect(seeker).toBeDefined();
-    if (!owner || !seeker) {
-      throw new Error('No se pudieron resolver usuarios luego del registro');
-    }
-
-    logStep(5, 'Creando propiedad');
+    logStep(4, 'Creando propiedad (queda en draft)');
     const property = await propertiesService.create({
       advertiserUserId: owner.id,
+      developerId: 'dev-constructora-01',
       operationType: 'buy',
       areaM2: 120,
       bedrooms: 3,
-      bathrooms: 2,
+      bathrooms: 2.5,
+      furnished: true,
       amenities: ['pool', 'gym'],
       photos: [{ url: faker.image.url(), category: 'cover' }],
       description: faker.lorem.paragraph(),
       cost: 3500000,
       requirements: ['official_id'],
-      availability: 'available_soon',
+      availability: 'available',
       nearbyPoints: [{ name: 'Metro', distanceM: 800, category: 'transport' }],
-      mapLocation: { lat: 25.6866, lng: -100.3161, address: 'Zona Centro, Monterrey' },
+      mapLocation: {
+        lat: 25.6866,
+        lng: -100.3161,
+        address: 'Zona Centro, Monterrey',
+        country: 'MX',
+        city: 'Monterrey',
+      },
     });
     const propertyId = String(property.id);
-    logStep(6, 'Propiedad creada', { propertyId, availability: property.availability });
+    expect(property.status).toBe('draft');
 
-    logStep(7, 'Cambiando disponibilidad de propiedad a available');
-    await propertiesService.changeAvailability(
-      propertyId,
-      { toStatus: 'available', reason: 'Lista para publicacion' },
-      owner.id,
-    );
-    logStep(8, 'Disponibilidad actualizada');
+    logStep(5, 'Publicando propiedad');
+    const publishedProperty = await propertiesService.publish(propertyId);
+    expect(publishedProperty?.status).toBe('published');
 
-    logStep(9, 'Creando listing para la propiedad');
+    logStep(6, 'Creando listing (queda en draft)');
     const listing = await listingsService.create({
       propertyId,
       title: 'Departamento premium',
-      summary: 'Excelente ubicacion',
+      summary: 'Excelente ubicacion zona centro',
+      dealType: 'real_estate_agency',
       price: 3500000,
     });
     const listingId = String(listing.id);
-    logStep(10, 'Listing creado', { listingId, propertyId });
+    expect(listing.status).toBe('draft');
+    expect(listing.dealType).toBe('real_estate_agency');
 
-    logStep(11, 'Login de usuario buscador');
+    logStep(7, 'Publicando listing');
+    const publishedListing = await listingsService.publish(listingId);
+    expect(publishedListing?.status).toBe('published');
+
+    logStep(8, 'Login de usuario buscador');
     const seekerLogin = await authService.login({
       email: seekerEmail,
       password,
@@ -473,67 +656,84 @@ describe('Real estate simulated flow', () => {
       userAgent: 'jest',
       ipAddress: '10.10.10.13',
     });
-    logStep(12, 'Login buscador correcto (tokens generados)', {
-      hasAccessToken: Boolean(seekerLogin.accessToken),
-      hasRefreshToken: Boolean(seekerLogin.refreshToken),
-    });
+    expect(seekerLogin.accessToken).toBeDefined();
 
-    logStep(13, 'Registrando historico de busquedas del usuario buscador');
-    await listingsRepository.recordSearchHistory({
-      userId: seeker.id,
+    logStep(9, 'Buscando listings con filtros');
+    const searchResult = await searchService.searchListings({
+      q: 'departamento',
       operationType: 'buy',
-      queryText: 'departamento 3 recamaras',
-      country: 'MX',
-      city: 'Monterrey',
       minPrice: 1000000,
       maxPrice: 5000000,
-      userLat: 25.6866,
-      userLng: -100.3161,
-      distanceRangeKm: 20,
-    });
-
-    await listingsRepository.recordSearchHistory({
-      userId: seeker.id,
-      operationType: 'buy',
-      queryText: 'zona centro',
+      bedrooms: 3,
+      bathrooms: 2.5,
+      furnished: true,
+      dealType: 'real_estate_agency',
       country: 'MX',
       city: 'Monterrey',
-      minPrice: 2000000,
-      maxPrice: 4500000,
-      userLat: 25.68,
-      userLng: -100.31,
-      distanceRangeKm: 15,
-    });
-    logStep(14, 'Historico de busquedas guardado', {
-      searchHistoryEntries: searchHistory.filter((entry) => entry.userId === seeker.id).length,
-    });
-
-    logStep(15, 'Consultando feed sin filtros (solo userId, basado en historial)');
-    const recordSearchHistoryCallsBeforeFeed =
-      listingsRepository.recordSearchHistory.mock.calls.length;
-    const feed = await listingsService.getFeed({
       userId: seeker.id,
     });
-    logStep(16, 'Feed personalizado recibido', {
-      totalResults: feed.length,
-      listingIds: feed.map((entry) => entry.listing.id),
+    logStep(10, 'Resultados de busqueda', {
+      total: searchResult.total,
+      listingIds: searchResult.items.map((item) => item.listing.id),
+    });
+    expect(searchResult.total).toBe(1);
+    expect(searchResult.items[0].listing.id).toBe(listingId);
+    expect(searchRepository.recordSearchHistory).toHaveBeenCalledTimes(1);
+
+    logStep(11, 'Viendo detalle del listing (view tracking)');
+    await listingsService.findById(listingId, seeker.id);
+
+    logStep(12, 'Registrando interaccion save via endpoint de eventos');
+    await listingsService.trackInteraction(listingId, {
+      eventType: 'save',
+      actorUserId: seeker.id,
     });
 
-    logStep(17, 'Consultando feed sin input para fallback global');
-    const feedWithoutInput = await listingsService.getFeed();
-    logStep(18, 'Feed global recibido', {
-      totalResults: feedWithoutInput.length,
-      listingIds: feedWithoutInput.map((entry) => entry.listing.id),
-    });
+    logStep(13, 'Registrando visita fisica a la propiedad');
+    await propertiesService.registerVisit(propertyId, seeker.id);
 
-    expect(feed.length).toBeGreaterThan(0);
-    expect(feed.some((entry) => entry.listing.id === listingId)).toBe(true);
-    expect(feedWithoutInput.length).toBeGreaterThan(0);
-    expect(listingsRepository.recordSearchHistory).toHaveBeenCalledTimes(2);
-    expect(listingsRepository.recordSearchHistory.mock.calls.length).toBe(
-      recordSearchHistoryCallsBeforeFeed,
-    );
-    expect(listingsRepository.trackListingView).toHaveBeenCalled();
-    logStep(19, 'Flujo validado exitosamente');
+    logStep(14, 'Verificando eventos outbox generados');
+    const topics = outboxEvents.map((event) => event.eventType);
+    expect(topics).toContain('properties.property_created.v1');
+    expect(topics).toContain('properties.property_published.v1');
+    expect(topics).toContain('listings.listing_created.v1');
+    expect(topics).toContain('listings.listing_published.v1');
+    expect(topics).toContain('search.search_performed.v1');
+    expect(topics).toContain('listings.listing_interaction.v1');
+    expect(topics).toContain('properties.property_visit_registered.v1');
+
+    logStep(15, 'Simulando relay del outbox hacia el consumidor de comportamiento');
+    for (const event of outboxEvents) {
+      if (event.eventType === 'search.search_performed.v1') {
+        await behaviorConsumer.onSearchPerformed(event as never);
+      }
+      if (event.eventType === 'listings.listing_interaction.v1') {
+        await behaviorConsumer.onListingInteraction(event as never);
+      }
+      if (event.eventType === 'properties.property_visit_registered.v1') {
+        await behaviorConsumer.onPropertyVisitRegistered(event as never);
+      }
+    }
+    logStep(16, 'Eventos de comportamiento registrados', {
+      total: behaviorEvents.length,
+      types: behaviorEvents.map((event) => event.eventType),
+    });
+    expect(behaviorEvents.length).toBeGreaterThanOrEqual(3);
+    expect(behaviorEvents.every((event) => event.userId === seeker.id)).toBe(true);
+
+    logStep(17, 'Agregando insights de comportamiento (worker)');
+    const { usersProcessed } = await analyticsService.aggregateAllUsers();
+    expect(usersProcessed).toBe(1);
+
+    logStep(18, 'Consultando insights materializados');
+    const insights = await analyticsService.getUserInsights(seeker.id);
+    logStep(19, 'Insights del usuario', insights);
+    expect(insights.materialized).toBe(true);
+    expect(insights.preferredOperationType).toBe('buy');
+    expect(insights.topCities).toContain('monterrey');
+    expect(insights.searchCount).toBe(1);
+    expect(Number(insights.saveCount)).toBeGreaterThanOrEqual(1);
+
+    logStep(20, 'Flujo validado exitosamente');
   });
 });

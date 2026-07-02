@@ -1,5 +1,5 @@
-import { SetMetadata } from '@nestjs/common';
 import { TwoFactorPurpose } from '@modules/auth/application/auth.types';
+import { SetMetadata } from '@nestjs/common';
 
 export const TWO_FACTOR_PURPOSE_KEY = 'two_factor_purpose';
 

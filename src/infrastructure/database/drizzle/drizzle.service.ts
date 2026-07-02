@@ -5,6 +5,12 @@ import { Pool } from 'pg';
 
 import { envConfig } from '../../../config/env.config';
 
+/**
+ * Minimal query surface shared by the root database instance and transaction
+ * handles, so repositories can run inside an ambient transaction.
+ */
+export type DrizzleExecutor = Pick<NodePgDatabase, 'select' | 'insert' | 'update' | 'delete'>;
+
 @Injectable()
 export class DrizzleService {
   readonly db: NodePgDatabase;

@@ -1,3 +1,6 @@
+import { IsIn } from 'class-validator';
+
 export class ChangeListingStatusDto {
-  status!: 'paused' | 'available';
+  @IsIn(['published', 'paused', 'closed'])
+  status!: 'published' | 'paused' | 'closed';
 }

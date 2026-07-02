@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -15,18 +16,23 @@ export const properties = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     advertiserUserId: text('advertiser_user_id').notNull(),
     developerName: text('developer_name'),
+    developerId: text('developer_id'), // match with the developer/construction company
     complexName: text('complex_name'),
+    status: text('status').notNull().default('draft'), // draft | published | archived
     operationType: text('operation_type').notNull(), // rent | buy
     rentPeriod: text('rent_period'), // short | long | indefinite
     areaM2: numeric('area_m2', { precision: 10, scale: 2 }).notNull(),
     bedrooms: integer('bedrooms').notNull().default(0),
-    bathrooms: integer('bathrooms').notNull().default(0),
-    amenities: jsonb('amenities').notNull().default([]),
+    // numeric(4,1) so half baths are representable (e.g. 2.5)
+    bathrooms: numeric('bathrooms', { precision: 4, scale: 1 }).notNull().default('0'),
+    furnished: boolean('furnished').notNull().default(false),
+    amenities: jsonb('amenities').notNull().default([]), // PropertyAmenity[]
     photos: jsonb('photos').notNull().default([]), // [{url, category}]
     description: text('description').notNull(),
     cost: numeric('cost', { precision: 14, scale: 2 }).notNull(),
     requirements: jsonb('requirements').notNull().default([]),
     availability: text('availability').notNull().default('available'),
+    availableFromDate: timestamp('available_from_date', { withTimezone: true }), // when availability = available_on_date
     publishedAt: timestamp('published_at', { withTimezone: true }),
     nearbyPoints: jsonb('nearby_points').notNull().default([]),
     mapLocation: jsonb('map_location').notNull().default({}),
@@ -38,6 +44,8 @@ export const properties = pgTable(
     index('idx_properties_advertiser').on(table.advertiserUserId),
     index('idx_properties_availability').on(table.availability),
     index('idx_properties_operation').on(table.operationType),
+    index('idx_properties_status').on(table.status),
+    index('idx_properties_developer').on(table.developerId),
   ],
 );
 
@@ -76,7 +84,8 @@ export const listings = pgTable(
     propertyId: uuid('property_id').notNull(),
     title: text('title').notNull(),
     summary: text('summary'),
-    status: text('status').notNull().default('available'), // available | paused
+    status: text('status').notNull().default('draft'), // draft | published | paused | closed
+    dealType: text('deal_type').notNull().default('direct_owner'), // direct_owner | owner_administrator | real_estate_agency | developer
     price: numeric('price', { precision: 14, scale: 2 }).notNull(),
     publishedAt: timestamp('published_at', { withTimezone: true }),
     deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
@@ -94,6 +103,7 @@ export const listings = pgTable(
   (table) => [
     index('idx_listings_property').on(table.propertyId),
     index('idx_listings_status').on(table.status),
+    index('idx_listings_deal_type').on(table.dealType),
   ],
 );
 

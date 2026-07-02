@@ -1,5 +1,6 @@
-import { envConfig } from '@config/env.config';
 import { TWO_FACTOR_PURPOSE_KEY } from '@common/decorators/two-factor-purpose.decorator';
+import { envConfig } from '@config/env.config';
+import { TwoFactorPurpose } from '@modules/auth/application/auth.types';
 import {
   CanActivate,
   ExecutionContext,
@@ -10,7 +11,6 @@ import {
 import { ConfigType } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { TwoFactorPurpose } from '@modules/auth/application/auth.types';
 
 @Injectable()
 export class SensitiveActionTwoFactorGuard implements CanActivate {

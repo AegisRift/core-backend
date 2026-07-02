@@ -1,7 +1,7 @@
 import { envConfig } from '@config/env.config';
-import { SendEmailInput } from '@shared/application/ports/email-provider.port';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
+import { SendEmailInput } from '@shared/application/ports/email-provider.port';
 import { Resend } from 'resend';
 
 @Injectable()

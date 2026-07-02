@@ -1,10 +1,10 @@
+import { PropertiesService } from '@modules/properties/application/properties.service';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { Request } from 'express';
 
-import { PropertiesService } from '@modules/properties/application/properties.service';
-
 import { ChangePropertyAvailabilityDto } from './dto/change-property-availability.dto';
 import { CreatePropertyDto } from './dto/create-property.dto';
+import { RegisterPropertyVisitDto } from './dto/register-property-visit.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 
 @Controller('properties')
@@ -32,6 +32,11 @@ export class PropertiesController {
     return this.propertiesService.findById(propertyId, viewerUserId);
   }
 
+  @Post(':id/publish')
+  publish(@Param('id') propertyId: string) {
+    return this.propertiesService.publish(propertyId);
+  }
+
   @Patch(':id')
   update(@Param('id') propertyId: string, @Body() body: UpdatePropertyDto) {
     return this.propertiesService.update(propertyId, body);
@@ -48,7 +53,7 @@ export class PropertiesController {
   }
 
   @Post(':id/visits')
-  registerVisit(@Param('id') propertyId: string, @Body() body: { userId: string }) {
+  registerVisit(@Param('id') propertyId: string, @Body() body: RegisterPropertyVisitDto) {
     return this.propertiesService.registerVisit(propertyId, body.userId);
   }
 

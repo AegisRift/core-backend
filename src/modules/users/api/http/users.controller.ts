@@ -1,10 +1,9 @@
 import { JwtAuthGuard } from '@auth-core/guards/jwt-auth.guard';
 import { TwoFactorPurposeRequired } from '@common/decorators/two-factor-purpose.decorator';
 import { SensitiveActionTwoFactorGuard } from '@common/guards/sensitive-action-2fa.guard';
+import { UsersService } from '@modules/users/application/users.service';
 import { Body, Controller, Patch, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
-
-import { UsersService } from '@modules/users/application/users.service';
 
 import { UpdateProfileDto } from './dto/update-profile.dto';
 

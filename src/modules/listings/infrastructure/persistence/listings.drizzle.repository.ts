@@ -1,42 +1,68 @@
-import { Injectable } from '@nestjs/common';
-import { and, desc, eq, ne } from 'drizzle-orm';
-
 import { DrizzleService } from '@infrastructure/database/drizzle/drizzle.service';
-import { authUsers } from '@infrastructure/database/drizzle/schema/auth.schema';
 import {
   listingAnalyticsEvents,
-  listingSearchHistory,
   listings,
   properties,
 } from '@infrastructure/database/drizzle/schema/real-estate.schema';
+import { OutboxRepository } from '@infrastructure/messaging/outbox/outbox.repository';
+import { Injectable } from '@nestjs/common';
+import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 
-import { CreateListingDto } from '../../api/http/dto/create-listing.dto';
-import { UpdateListingDto } from '../../api/http/dto/update-listing.dto';
-import { ListingsRepositoryPort } from '../../application/ports/listings.repository.port';
-import { ListingEntity } from '../../domain/entities/listing.entity';
+import { DomainEvent } from '../../../../shared/domain/events/domain-event';
+import { ListingDealType } from '../../domain/listing.constants';
+
+export type ListingRow = typeof listings.$inferSelect;
+export type PropertyRow = typeof properties.$inferSelect;
+
+export interface CreateListingInput {
+  propertyId: string;
+  title: string;
+  summary?: string;
+  dealType: ListingDealType;
+  price: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateListingInput {
+  title?: string;
+  summary?: string;
+  dealType?: ListingDealType;
+  price?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export type ListingInteractionType =
+  'view' | 'save' | 'lead' | 'visit_scheduled' | 'application' | 'chat_message';
+
+type EventsFactory = (row: ListingRow) => DomainEvent[];
 
 @Injectable()
-export class ListingsDrizzleRepository implements ListingsRepositoryPort {
-  constructor(private readonly drizzle: DrizzleService) {}
+export class ListingsDrizzleRepository {
+  constructor(
+    private readonly drizzle: DrizzleService,
+    private readonly outbox: OutboxRepository,
+  ) {}
 
-  async create(body: CreateListingDto) {
-    const [created] = await this.drizzle.db
-      .insert(listings)
-      .values({
-        propertyId: body.propertyId,
-        title: body.title,
-        summary: body.summary,
-        price: String(body.price),
-        status: 'available',
-        publishedAt: body.publishedAt ? new Date(body.publishedAt) : new Date(),
-        metadata: body.metadata ?? {},
-      })
-      .returning();
-    return created;
-  }
-
-  async findAll() {
-    return this.drizzle.db.select().from(listings).orderBy(desc(listings.createdAt));
+  async create(input: CreateListingInput, eventsFactory?: EventsFactory): Promise<ListingRow> {
+    return this.drizzle.db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(listings)
+        .values({
+          propertyId: input.propertyId,
+          title: input.title,
+          summary: input.summary,
+          dealType: input.dealType,
+          price: String(input.price),
+          status: 'draft',
+          publishedAt: null,
+          metadata: input.metadata ?? {},
+        })
+        .returning();
+      for (const event of eventsFactory?.(created) ?? []) {
+        await this.outbox.add(event, tx);
+      }
+      return created;
+    });
   }
 
   async findAllAvailable() {
@@ -47,11 +73,17 @@ export class ListingsDrizzleRepository implements ListingsRepositoryPort {
       })
       .from(listings)
       .innerJoin(properties, eq(properties.id, listings.propertyId))
-      .where(and(eq(listings.status, 'available'), ne(properties.availability, 'unavailable')))
+      .where(
+        and(
+          eq(listings.status, 'published'),
+          eq(properties.status, 'published'),
+          ne(properties.availability, 'unavailable'),
+        ),
+      )
       .orderBy(desc(listings.createdAt));
   }
 
-  async findById(listingId: string) {
+  async findById(listingId: string): Promise<ListingRow | undefined> {
     const [listing] = await this.drizzle.db
       .select()
       .from(listings)
@@ -60,7 +92,16 @@ export class ListingsDrizzleRepository implements ListingsRepositoryPort {
     return listing;
   }
 
-  async findByIdAvailable(listingId: string) {
+  async findPropertyById(propertyId: string): Promise<PropertyRow | null> {
+    const [row] = await this.drizzle.db
+      .select()
+      .from(properties)
+      .where(eq(properties.id, propertyId))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findByIdWithProperty(listingId: string) {
     const [row] = await this.drizzle.db
       .select({
         listing: listings,
@@ -70,20 +111,31 @@ export class ListingsDrizzleRepository implements ListingsRepositoryPort {
       .innerJoin(properties, eq(properties.id, listings.propertyId))
       .where(eq(listings.id, listingId))
       .limit(1);
-    if (!row || row.listing.status !== 'available' || row.property.availability === 'unavailable') {
+    return row ?? null;
+  }
+
+  async findByIdAvailable(listingId: string) {
+    const row = await this.findByIdWithProperty(listingId);
+    if (
+      !row ||
+      row.listing.status !== 'published' ||
+      row.property.status !== 'published' ||
+      row.property.availability === 'unavailable'
+    ) {
       return null;
     }
     return row;
   }
 
-  async update(listingId: string, body: UpdateListingDto) {
+  async update(listingId: string, input: UpdateListingInput) {
     const [updated] = await this.drizzle.db
       .update(listings)
       .set({
-        title: body.title,
-        summary: body.summary,
-        price: body.price !== undefined ? String(body.price) : undefined,
-        metadata: body.metadata,
+        title: input.title,
+        summary: input.summary,
+        dealType: input.dealType,
+        price: input.price !== undefined ? String(input.price) : undefined,
+        metadata: input.metadata,
         updatedAt: new Date(),
       })
       .where(eq(listings.id, listingId))
@@ -95,41 +147,67 @@ export class ListingsDrizzleRepository implements ListingsRepositoryPort {
     await this.drizzle.db.delete(listings).where(eq(listings.id, listingId));
   }
 
-  async changeStatus(listingId: string, status: 'paused' | 'available') {
-    const [changed] = await this.drizzle.db
-      .update(listings)
-      .set({
-        status,
-        deactivatedAt: status === 'paused' ? new Date() : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(listings.id, listingId))
-      .returning();
-    return changed;
+  async publish(listingId: string, eventsFactory?: EventsFactory) {
+    return this.drizzle.db.transaction(async (tx) => {
+      const [published] = await tx
+        .update(listings)
+        .set({
+          status: 'published',
+          publishedAt: new Date(),
+          deactivatedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(listings.id, listingId), inArray(listings.status, ['draft', 'paused'])))
+        .returning();
+      if (!published) {
+        return null;
+      }
+      for (const event of eventsFactory?.(published) ?? []) {
+        await this.outbox.add(event, tx);
+      }
+      return published;
+    });
+  }
+
+  async changeStatus(
+    listingId: string,
+    status: 'published' | 'paused' | 'closed',
+    eventsFactory?: EventsFactory,
+  ) {
+    return this.drizzle.db.transaction(async (tx) => {
+      const [changed] = await tx
+        .update(listings)
+        .set({
+          status,
+          deactivatedAt: status === 'paused' || status === 'closed' ? new Date() : null,
+          updatedAt: new Date(),
+        })
+        .where(eq(listings.id, listingId))
+        .returning();
+      if (!changed) {
+        return null;
+      }
+      for (const event of eventsFactory?.(changed) ?? []) {
+        await this.outbox.add(event, tx);
+      }
+      return changed;
+    });
   }
 
   async trackAnalyticsEvent(
     listingId: string,
     input: {
-      eventType: 'view' | 'save' | 'lead' | 'visit_scheduled' | 'application' | 'chat_message';
+      eventType: ListingInteractionType;
       value: number;
       actorUserId?: string;
       metadata: Record<string, unknown>;
     },
+    events?: DomainEvent[],
   ) {
     const existing = await this.findById(listingId);
     if (!existing) {
       return null;
     }
-
-    await this.drizzle.db.insert(listingAnalyticsEvents).values({
-      listingId,
-      eventType: input.eventType,
-      value: input.value,
-      actorUserId: input.actorUserId,
-      metadata: input.metadata,
-      occurredAt: new Date(),
-    });
 
     const next = {
       viewsCount: existing.viewsCount,
@@ -146,126 +224,55 @@ export class ListingsDrizzleRepository implements ListingsRepositoryPort {
     if (input.eventType === 'application') next.applicationsCount += input.value;
     if (input.eventType === 'chat_message') next.chatMessagesCount += input.value;
 
-    const [updated] = await this.drizzle.db
-      .update(listings)
-      .set({
-        ...next,
-        lastInteractionAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(listings.id, listingId))
-      .returning();
-    return updated;
+    return this.drizzle.db.transaction(async (tx) => {
+      await tx.insert(listingAnalyticsEvents).values({
+        listingId,
+        eventType: input.eventType,
+        value: input.value,
+        actorUserId: input.actorUserId,
+        metadata: input.metadata,
+        occurredAt: new Date(),
+      });
+
+      const [updated] = await tx
+        .update(listings)
+        .set({
+          ...next,
+          lastInteractionAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(listings.id, listingId))
+        .returning();
+
+      for (const event of events ?? []) {
+        await this.outbox.add(event, tx);
+      }
+      return updated;
+    });
   }
 
   async trackListingView(
     listingId: string,
     input: {
       actorUserId?: string;
-      source: 'listings_all' | 'listing_detail' | 'listings_feed';
+      source: 'listings_all' | 'listing_detail' | 'search_results';
       metadata?: Record<string, unknown>;
     },
+    events?: DomainEvent[],
   ) {
-    return this.trackAnalyticsEvent(listingId, {
-      eventType: 'view',
-      value: 1,
-      actorUserId: input.actorUserId,
-      metadata: {
-        source: input.source,
-        ...(input.metadata ?? {}),
+    return this.trackAnalyticsEvent(
+      listingId,
+      {
+        eventType: 'view',
+        value: 1,
+        actorUserId: input.actorUserId,
+        metadata: {
+          source: input.source,
+          ...(input.metadata ?? {}),
+        },
       },
-    });
-  }
-
-  async recordSearchHistory(input: {
-    userId: string;
-    queryText?: string;
-    operationType?: string;
-    minPrice?: number;
-    maxPrice?: number;
-    country?: string;
-    city?: string;
-    distanceRangeKm?: number;
-    userLat?: number;
-    userLng?: number;
-    bedrooms?: number;
-  }) {
-    await this.drizzle.db.insert(listingSearchHistory).values({
-      userId: input.userId,
-      queryText: input.queryText,
-      operationType: input.operationType,
-      minPrice: input.minPrice !== undefined ? String(input.minPrice) : null,
-      maxPrice: input.maxPrice !== undefined ? String(input.maxPrice) : null,
-      country: input.country,
-      city: input.city,
-      distanceRangeKm: input.distanceRangeKm !== undefined ? String(input.distanceRangeKm) : null,
-      userLat: input.userLat !== undefined ? String(input.userLat) : null,
-      userLng: input.userLng !== undefined ? String(input.userLng) : null,
-      bedrooms: input.bedrooms,
-      createdAt: new Date(),
-    });
-  }
-
-  async getRecentSearchHistory(userId: string) {
-    return this.drizzle.db
-      .select()
-      .from(listingSearchHistory)
-      .where(eq(listingSearchHistory.userId, userId))
-      .orderBy(desc(listingSearchHistory.createdAt))
-      .limit(20);
-  }
-
-  async getUserProfile(userId: string) {
-    const [user] = await this.drizzle.db
-      .select()
-      .from(authUsers)
-      .where(eq(authUsers.id, userId))
-      .limit(1);
-    return user;
-  }
-
-  async getFeedCandidates(filters?: {
-    operationType?: string;
-    minPrice?: number;
-    maxPrice?: number;
-    country?: string;
-    city?: string;
-    bedrooms?: number;
-  }) {
-    const rows = await this.findAllAvailable();
-    return rows.filter((row) => {
-      if (!filters) {
-        return true;
-      }
-      const price = Number(row.listing.price);
-      if (filters.operationType && row.property.operationType !== filters.operationType) {
-        return false;
-      }
-      if (filters.minPrice !== undefined && price < filters.minPrice) {
-        return false;
-      }
-      if (filters.maxPrice !== undefined && price > filters.maxPrice) {
-        return false;
-      }
-      if (
-        filters.country &&
-        String((row.property.mapLocation as { country?: string })?.country ?? '').toLowerCase() !==
-          filters.country.toLowerCase()
-      ) {
-        return false;
-      }
-      if (
-        filters.city &&
-        String((row.property.mapLocation as { city?: string })?.city ?? '').toLowerCase() !==
-          filters.city.toLowerCase()
-      ) {
-        return false;
-      }
-      if (filters.bedrooms !== undefined && row.property.bedrooms < filters.bedrooms) {
-        return false;
-      }
-      return true;
-    });
+      events,
+    );
   }
 
   async getAnalytics(listingId: string) {
@@ -292,17 +299,5 @@ export class ListingsDrizzleRepository implements ListingsRepositoryPort {
       lastInteractionAt: listing.lastInteractionAt,
       recentEvents: events,
     };
-  }
-
-  async save(entity: ListingEntity): Promise<void> {
-    await this.drizzle.db.insert(listings).values({
-      id: entity.id,
-      propertyId: entity.propertyId,
-      title: entity.title,
-      price: String(entity.price),
-      status: entity.currentStatus === 'published' ? 'available' : 'paused',
-      publishedAt: new Date(),
-      metadata: {},
-    });
   }
 }

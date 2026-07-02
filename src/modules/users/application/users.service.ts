@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
 import { UsersRepository } from '@modules/users/infrastructure/persistence/users.repository';
+import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { UpdateProfileDto } from '../api/http/dto/update-profile.dto';
 

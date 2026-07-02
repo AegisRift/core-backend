@@ -5,6 +5,7 @@ import { ListingsService } from '../../application/listings.service';
 
 import { ChangeListingStatusDto } from './dto/change-listing-status.dto';
 import { CreateListingDto } from './dto/create-listing.dto';
+import { TrackListingAnalyticsEventDto } from './dto/track-listing-analytics-event.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 
 @Controller('listings')
@@ -21,20 +22,6 @@ export class ListingsController {
     return this.listingsService.findAll(viewerUserId);
   }
 
-  @Get('feed')
-  feed(
-    @Req() request: Request,
-    @Query('userId') userIdFromQuery?: string,
-    @Query('limit') limit?: string,
-  ) {
-    const userIdFromToken = (request.user as { userId?: string } | undefined)?.userId;
-    const userId = userIdFromQuery ?? userIdFromToken;
-    return this.listingsService.getFeed({
-      userId,
-      limit: limit !== undefined ? Number(limit) : undefined,
-    });
-  }
-
   @Get(':id')
   findById(
     @Param('id') listingId: string,
@@ -44,6 +31,16 @@ export class ListingsController {
     const viewerFromToken = (request.user as { userId?: string } | undefined)?.userId;
     const viewerUserId = viewerUserIdFromQuery ?? viewerFromToken;
     return this.listingsService.findById(listingId, viewerUserId);
+  }
+
+  @Post(':id/publish')
+  publish(@Param('id') listingId: string) {
+    return this.listingsService.publish(listingId);
+  }
+
+  @Post(':id/events')
+  trackInteraction(@Param('id') listingId: string, @Body() body: TrackListingAnalyticsEventDto) {
+    return this.listingsService.trackInteraction(listingId, body);
   }
 
   @Patch(':id')

@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { emailConfirmationTemplate } from './templates/email-confirmation.template';
-import { twoFactorCodeTemplate } from './templates/two-factor-code.template';
 import { NotificationTemplateDefinition, NotificationTemplateId } from './templates/template.types';
+import { twoFactorCodeTemplate } from './templates/two-factor-code.template';
 
 @Injectable()
 export class TemplateRendererService {
