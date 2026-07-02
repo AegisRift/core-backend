@@ -5,7 +5,13 @@ import {
   properties,
 } from '@infrastructure/database/drizzle/schema/real-estate.schema';
 import { Injectable } from '@nestjs/common';
+import { buildPaginatedResult, DEFAULT_PAGE_SIZE } from '@shared/application/pagination/pagination';
 import { and, desc, eq, ne, sql, SQL } from 'drizzle-orm';
+
+export interface PaginationInput {
+  page?: number;
+  pageSize?: number;
+}
 
 export interface SearchListingsFilters {
   q?: string;
@@ -38,7 +44,7 @@ export class SearchRepository {
 
   async searchListings(filters: SearchListingsFilters) {
     const page = filters.page ?? 1;
-    const pageSize = filters.pageSize ?? 20;
+    const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE;
 
     const conditions: SQL[] = [
       eq(listings.status, 'published'),
@@ -167,15 +173,15 @@ export class SearchRepository {
       .innerJoin(properties, eq(properties.id, listings.propertyId))
       .where(where);
 
-    return {
-      items: items.map((row) => ({
+    return buildPaginatedResult(
+      items.map((row) => ({
         ...row,
         distanceKm: row.distanceKm !== null ? Number(Number(row.distanceKm).toFixed(2)) : null,
       })),
       total,
       page,
       pageSize,
-    };
+    );
   }
 
   async recordSearchHistory(input: {
@@ -207,12 +213,23 @@ export class SearchRepository {
     });
   }
 
-  async getRecentSearchHistory(userId: string) {
-    return this.drizzle.db
+  async getRecentSearchHistory(userId: string, pagination?: PaginationInput) {
+    const page = pagination?.page ?? 1;
+    const pageSize = pagination?.pageSize ?? DEFAULT_PAGE_SIZE;
+
+    const items = await this.drizzle.db
       .select()
       .from(listingSearchHistory)
       .where(eq(listingSearchHistory.userId, userId))
       .orderBy(desc(listingSearchHistory.createdAt))
-      .limit(20);
+      .limit(pageSize)
+      .offset((page - 1) * pageSize);
+
+    const [{ total }] = await this.drizzle.db
+      .select({ total: sql<number>`cast(count(*) as integer)` })
+      .from(listingSearchHistory)
+      .where(eq(listingSearchHistory.userId, userId));
+
+    return buildPaginatedResult(items, total, page, pageSize);
   }
 }

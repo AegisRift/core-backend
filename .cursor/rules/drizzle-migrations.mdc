@@ -1,0 +1,15 @@
+---
+description: Drizzle schema and SQL migration conventions
+globs: drizzle/**/*.sql,src/infrastructure/database/**/*.ts
+alwaysApply: false
+---
+
+# Drizzle Schema & Migrations
+
+- Schemas live in `src/infrastructure/database/drizzle/schema/` (`auth`, `real-estate`, `analytics`, `outbox`). Every schema change requires a matching hand-written migration in `drizzle/migrations/NNNN_short_name.sql` (sequential, latest is 0012).
+- Migrations must be idempotent where possible: `ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, plus data backfill `UPDATE`s for existing rows.
+- Enum-like columns are `text` with a comment listing allowed values; the source of truth is a `as const` array in the module's `domain/*.constants.ts`, validated with `@IsIn` in DTOs. No Postgres enums.
+- `numeric` columns (price, cost, areaM2, bathrooms) are strings in Drizzle results: `String()` on insert/update, `Number()` when exposing.
+- `bathrooms` is `numeric(4,1)` to support half baths (2.5). `mapLocation`, `amenities`, `photos`, `metadata` are `jsonb`.
+- Index anything used as a search filter (status, operationType, dealType, developerId, price, JSONB expressions like `map_location->>'country'`).
+- Business data belongs in real columns, not `metadata` (e.g. `available_from_date` was promoted from metadata to a column).

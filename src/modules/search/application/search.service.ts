@@ -4,7 +4,7 @@ import { Injectable } from '@nestjs/common';
 import { EVENT_TOPICS } from '../../../events/contracts/integration-events/keuwo-events.examples';
 import { buildDomainEvent } from '../../../shared/domain/events/build-domain-event';
 import { SearchListingsQueryDto } from '../api/http/dto/search-listings.query.dto';
-import { SearchRepository } from '../infrastructure/persistence/search.repository';
+import { PaginationInput, SearchRepository } from '../infrastructure/persistence/search.repository';
 
 @Injectable()
 export class SearchService {
@@ -66,7 +66,7 @@ export class SearchService {
     return result;
   }
 
-  getRecentSearchHistory(userId: string) {
-    return this.searchRepository.getRecentSearchHistory(userId);
+  getRecentSearchHistory(userId: string, pagination?: PaginationInput) {
+    return this.searchRepository.getRecentSearchHistory(userId, pagination);
   }
 }

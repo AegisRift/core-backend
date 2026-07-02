@@ -10,6 +10,26 @@ import { NotificationsService } from '../../src/modules/notifications/applicatio
 describe('AuthService', () => {
   it('generates access and refresh tokens', async () => {
     const passwordHash = await bcrypt.hash('Admin1234!', 10);
+    const user = {
+      id: 'user-1',
+      email: 'admin@keuwo.local',
+      passwordHash,
+      firstName: 'Admin',
+      lastName: 'Keuwo',
+      birthDate: null,
+      phone: null,
+      country: 'MX',
+      occupation: null,
+      city: null,
+      userType: 'buyer',
+      preferredContactMethod: 'whatsapp',
+      isPhoneVerified: false,
+      isEmailVerified: true,
+      emailVerifiedAt: new Date(),
+      isActive: true,
+      updatedAt: new Date(),
+      createdAt: new Date(),
+    };
     const authRepositoryMock: Pick<
       AuthRepository,
       | 'findUserByEmail'
@@ -20,25 +40,16 @@ describe('AuthService', () => {
       | 'revokeSession'
       | 'createEmailVerificationToken'
     > = {
-      findUserByEmail: async () => ({
-        id: 'user-1',
-        email: 'admin@keuwo.local',
-        passwordHash,
-        isActive: true,
-        createdAt: new Date(),
-      }),
+      findUserByEmail: async () => user,
       createSession: async () => undefined,
       ensureSeedUser: async () => undefined,
-      findUserById: async () => ({
-        id: 'user-1',
-        email: 'admin@keuwo.local',
-        passwordHash,
-        isActive: true,
-        createdAt: new Date(),
-      }),
+      findUserById: async () => user,
       findActiveSession: async () => ({
         id: 'session-1',
         userId: 'user-1',
+        deviceId: 'device-1',
+        deviceName: null,
+        deviceLocation: null,
         refreshTokenHash: passwordHash,
         userAgent: null,
         ipAddress: null,

@@ -3,6 +3,7 @@ import { Request } from 'express';
 
 import { SearchService } from '../../application/search.service';
 
+import { SearchHistoryQueryDto } from './dto/search-history.query.dto';
 import { SearchListingsQueryDto } from './dto/search-listings.query.dto';
 
 @Controller('search')
@@ -19,7 +20,7 @@ export class SearchController {
   }
 
   @Get('history/:userId')
-  getRecentSearchHistory(@Param('userId') userId: string) {
-    return this.searchService.getRecentSearchHistory(userId);
+  getRecentSearchHistory(@Param('userId') userId: string, @Query() query: SearchHistoryQueryDto) {
+    return this.searchService.getRecentSearchHistory(userId, query);
   }
 }

@@ -1,17 +1,13 @@
 import { SearchService } from '../../src/modules/search/application/search.service';
+import { buildPaginatedResult } from '../../src/shared/application/pagination/pagination';
 import { DomainEvent } from '../../src/shared/domain/events/domain-event';
 
 describe('SearchService', () => {
   const buildService = () => {
     const searchRepository = {
-      searchListings: jest.fn(async () => ({
-        items: [],
-        total: 5,
-        page: 1,
-        pageSize: 20,
-      })),
+      searchListings: jest.fn(async () => buildPaginatedResult([], 5, 1, 20)),
       recordSearchHistory: jest.fn(async () => undefined),
-      getRecentSearchHistory: jest.fn(async () => []),
+      getRecentSearchHistory: jest.fn(async () => buildPaginatedResult([], 0, 1, 20)),
     };
     const outbox = {
       add: jest.fn(async (event: DomainEvent) => {
@@ -85,5 +81,27 @@ describe('SearchService', () => {
     await service.searchListings({ q: 'casa' });
     expect(searchRepository.recordSearchHistory).not.toHaveBeenCalled();
     expect(outbox.add).not.toHaveBeenCalled();
+  });
+
+  it('returns pagination metadata from search results', async () => {
+    const { service } = buildService();
+    const result = await service.searchListings({ q: 'casa' });
+    expect(result).toMatchObject({
+      total: 5,
+      page: 1,
+      pageSize: 20,
+      totalPages: 1,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    });
+  });
+
+  it('passes pagination through to the history repository', async () => {
+    const { service, searchRepository } = buildService();
+    await service.getRecentSearchHistory('user-1', { page: 2, pageSize: 10 });
+    expect(searchRepository.getRecentSearchHistory).toHaveBeenCalledWith('user-1', {
+      page: 2,
+      pageSize: 10,
+    });
   });
 });

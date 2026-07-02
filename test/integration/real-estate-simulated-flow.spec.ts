@@ -9,6 +9,7 @@ import { ListingsService } from '../../src/modules/listings/application/listings
 import { NotificationsService } from '../../src/modules/notifications/application/notifications.service';
 import { PropertiesService } from '../../src/modules/properties/application/properties.service';
 import { SearchService } from '../../src/modules/search/application/search.service';
+import { buildPaginatedResult } from '../../src/shared/application/pagination/pagination';
 import { DomainEvent } from '../../src/shared/domain/events/domain-event';
 
 describe('Real estate simulated flow', () => {
@@ -470,19 +471,25 @@ describe('Real estate simulated flow', () => {
                 return false;
               return true;
             });
-          return {
+          return buildPaginatedResult(
             items,
-            total: items.length,
-            page: filters.page ?? 1,
-            pageSize: filters.pageSize ?? 20,
-          };
+            items.length,
+            filters.page ?? 1,
+            filters.pageSize ?? 20,
+          );
         },
       ),
       recordSearchHistory: jest.fn(async (input: Record<string, unknown>) => {
         searchHistory.push(input);
       }),
-      getRecentSearchHistory: jest.fn(async (userId: string) =>
-        searchHistory.filter((item) => item.userId === userId),
+      getRecentSearchHistory: jest.fn(
+        async (userId: string, pagination?: { page?: number; pageSize?: number }) => {
+          const page = pagination?.page ?? 1;
+          const pageSize = pagination?.pageSize ?? 20;
+          const all = searchHistory.filter((item) => item.userId === userId);
+          const items = all.slice((page - 1) * pageSize, page * pageSize);
+          return buildPaginatedResult(items, all.length, page, pageSize);
+        },
       ),
     };
 

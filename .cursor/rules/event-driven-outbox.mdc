@@ -1,0 +1,39 @@
+---
+description: Event-driven and transactional outbox conventions for domain modules
+globs: src/modules/**/*.ts
+alwaysApply: false
+---
+
+# Event-Driven Conventions
+
+Every state change that matters to other systems must emit a domain event through the outbox, atomically with the DB write.
+
+## Pattern
+
+```typescript
+// Service layer: build events, delegate transaction to the repository
+return this.repo.create(input, (created) => [
+  buildDomainEvent({
+    eventType: EVENT_TOPICS.LISTING_CREATED,
+    aggregateId: created.id,
+    payload: { listingId: created.id /* denormalized context for analytics */ },
+  }),
+]);
+
+// Repository layer: single transaction for row + outbox
+await this.drizzle.db.transaction(async (tx) => {
+  const [row] = await tx.insert(table).values(...).returning();
+  for (const event of eventsFactory?.(row) ?? []) {
+    await this.outbox.add(event, tx);
+  }
+  return row;
+});
+```
+
+## Rules
+
+- Never call `outbox.add` outside the transaction that persists the domain change (except read-side events like `search_performed`, which have no domain write).
+- New event types go in `EVENT_TOPICS` (`src/events/contracts/integration-events/keuwo-events.examples.ts`) with versioned names: `domain.event_name.v1`.
+- Event payloads should carry denormalized context (country, city, price, operationType, dealType, furnished, amenities) so the analytics consumer never needs extra queries.
+- User-behavior events flow: outbox/event bus → `BehaviorEventsConsumer` (`@OnEvent`) → `user_behavior_events` → `AnalyticsWorker` aggregates → `user_behavior_insights`. If a new event should influence recommendations, register it in the consumer and in `insights.aggregator.ts`.
+- The consumer must never throw: wrap handlers in try/catch and log, so event flow is not blocked.

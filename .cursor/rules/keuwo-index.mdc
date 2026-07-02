@@ -1,0 +1,48 @@
+---
+description: Quick index of the Keuwo backend - stack, module map, commands and conventions
+alwaysApply: true
+---
+
+# Keuwo Backend - Quick Index
+
+Real-estate rent/buy platform. NestJS 11 + TypeScript, Drizzle ORM (PostgreSQL), BullMQ (Redis), EventEmitter2 internal bus, Socket.io (planned migration to AWS AppSync), Resend email, JWT auth with 2FA.
+
+## Module map (`src/modules/`)
+
+| Module | Purpose |
+|---|---|
+| `auth` | Login/JWT, sessions with deviceId, 2FA challenges, email/phone confirmation |
+| `properties` | Property CRUD, lifecycle draft→published→archived, availability, visits |
+| `listings` | Listing CRUD, lifecycle draft→published→paused→closed, dealType, interaction tracking |
+| `search` | Paginated listing search (FTS + geo + filters), search history |
+| `analytics` | Behavior events consumer, user insights aggregation (`/analytics/users/:id/insights`) |
+| `notifications` | Email/SMS templates and dispatch (Resend) |
+| `users`, `chat`, `applications`, `contracts`, `documents`, `payments`, `visits` | Supporting domains (some are stubs) |
+
+## Key infrastructure (`src/infrastructure/`)
+
+- `database/drizzle/` — DrizzleService, schemas (`auth`, `real-estate`, `analytics`, `outbox`)
+- `messaging/outbox/` — OutboxRepository (transactional outbox)
+- `queue/` — BullMQ module + `QueueSchedulers` (repeatable jobs: `outbox-relay` 5s, `analytics` 60s)
+
+## Core conventions
+
+- Transactional outbox: repository writes accept an `eventsFactory(row) => DomainEvent[]` callback and persist domain rows + outbox events in one Drizzle transaction. Build events with `buildDomainEvent()` (`src/shared/domain/events/`).
+- Event topics live in `src/events/contracts/integration-events/keuwo-events.examples.ts` (`EVENT_TOPICS`).
+- Domain enums: `PROPERTY_AMENITIES` + availabilities in `src/modules/properties/domain/property.constants.ts`; `LISTING_DEAL_TYPES` in `src/modules/listings/domain/listing.constants.ts`.
+- Pagination: use `buildPaginatedResult()` / `PaginatedResult<T>` from `src/shared/application/pagination/pagination.ts`. Never return unbounded lists.
+- Drizzle `numeric` columns map to strings: convert with `String(value)` on write, `Number(value)` on read.
+- Global `ValidationPipe` (transform + whitelist + implicit conversion). DTOs use class-validator; conditional requirements use `@ValidateIf`.
+- Path aliases: `@app`, `@modules`, `@infrastructure`, `@shared`, `@auth`, `@config`, `@events`, `@jobs` (see tsconfig paths).
+
+## Commands
+
+- Tests: `npm test` (jest, `*.spec.ts` in `test/unit` and `test/integration`)
+- Typecheck src only: `npx tsc -p tsconfig.build.json --noEmit`; with tests: `npx tsc --noEmit`
+- Lint: `npm run lint` / `npm run lint:fix` (prettier formatting is enforced; run lint:fix after edits)
+- Migrations are hand-written SQL in `drizzle/migrations/NNNN_name.sql` (latest: 0012)
+
+## Known noise (pre-existing, do not chase)
+
+- 3 lint warnings (floating promises in `drizzle/seeds/seed.ts` and socket gateways)
+- Jest warning "worker process has failed to exit gracefully"
