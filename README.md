@@ -1,98 +1,110 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Keuwo Core Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend service for the Keuwo platform, built with NestJS and TypeScript.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Stack
 
-## Description
+- Node.js + NestJS
+- PostgreSQL + Drizzle ORM
+- Redis + BullMQ
+- Socket.IO (realtime)
+- S3-compatible object storage (MinIO in local)
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Project Structure
 
-## Project setup
+- `src/modules`: business modules (`auth`, `users`, `properties`, `listings`, etc.)
+- `src/infrastructure`: adapters for database, messaging, redis, and storage
+- `src/realtime`: websocket gateways and adapters
+- `src/observability`: logging, metrics, and tracing setup
+- `drizzle`: migrations and seeds
+- `test`: unit, integration, e2e, and contract tests
 
-```bash
-$ npm install
-```
+## Prerequisites
 
-## Compile and run the project
+- Node.js 20+
+- npm 10+
+- Docker + Docker Compose (recommended for local infra)
+
+## Quick Start
+
+1. Install dependencies:
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm install
 ```
 
-## Run tests
+2. Create your environment file:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+cp .env.example .env
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+3. Start local infrastructure (PostgreSQL, Redis, MinIO):
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+docker compose up -d postgres redis minio
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+4. Run database migrations:
 
-## Resources
+```bash
+npm run drizzle:migrate
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+5. Start the API in development mode:
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```bash
+npm run start:dev
+```
 
-## Support
+API will be available at `http://localhost:3000`.
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## Available Scripts
 
-## Stay in touch
+- `npm run build`: build TypeScript to `dist`
+- `npm run start`: run compiled app
+- `npm run start:dev`: run app with ts-node
+- `npm run start:debug`: run app in debug mode
+- `npm run lint`: lint sources
+- `npm run lint:fix`: lint and auto-fix
+- `npm run test`: run unit tests
+- `npm run test:e2e`: run e2e suite
+- `npm run test:cov`: run tests with coverage
+- `npm run drizzle:generate`: generate new migrations
+- `npm run drizzle:migrate`: apply migrations
+- `npm run drizzle:push`: push schema changes directly
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## Environment Variables
 
-## License
+All local defaults are documented in `.env.example`.
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Important variables:
+
+- `DATABASE_URL`: PostgreSQL connection string
+- `REDIS_HOST`, `REDIS_PORT`: Redis connection settings
+- `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`: JWT secrets
+- `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: object storage credentials
+
+## Local Services (Docker Compose)
+
+`docker-compose.yml` defines:
+
+- `postgres` on `5432`
+- `redis` on `6379`
+- `minio` API on `9000` and console on `9001`
+- `api` container for development usage
+
+## Testing
+
+```bash
+# unit + integration (default jest config)
+npm run test
+
+# end-to-end
+npm run test:e2e
+```
+
+## Notes
+
+- This repository uses `.gitignore` to exclude `node_modules`, build output, coverage, and environment files.
+- Keep secrets in `.env` only; never commit real credentials.
