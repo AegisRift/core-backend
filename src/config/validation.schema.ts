@@ -10,8 +10,16 @@ const envSchema = z.object({
   REFRESH_TOKEN_SECRET: z.string().min(8).default('change-me-too'),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().positive().default(900),
   REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().positive().default(2592000),
+  TWO_FA_CODE_TTL_SECONDS: z.coerce.number().positive().default(300),
+  TWO_FA_VERIFICATION_TOKEN_TTL_SECONDS: z.coerce.number().positive().default(600),
+  TWO_FA_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: z.coerce.number().positive().default(86400),
+  TWO_FA_TOKEN_SECRET: z.string().min(8).default('change-me-two-fa'),
   SEED_USER_EMAIL: z.string().email().optional(),
   SEED_USER_PASSWORD: z.string().min(8).optional(),
+  RESEND_API_KEY: z.string().optional(),
+  RESEND_FROM_EMAIL: z.string().min(3).default('Keuwo <no-reply@keuwo.local>'),
+  FRONTEND_VERIFY_EMAIL_URL: z.string().url().default('http://localhost:3001/confirm-email'),
 });
 
 export function envValidationSchema(config: Record<string, unknown>) {

@@ -5,6 +5,11 @@ import { PermissionsGuard } from '@common/guards/permissions.guard';
 import { LoginDto } from '@dto/login.dto';
 import { RefreshTokenDto } from '@dto/refresh-token.dto';
 import { RegisterDto } from '@dto/register.dto';
+import { ConfirmEmailDto } from '@modules/auth/api/http/dto/confirm-email.dto';
+import { ContactConfirmationChallengeDto } from '@modules/auth/api/http/dto/contact-confirmation-challenge.dto';
+import { ContactConfirmationVerifyDto } from '@modules/auth/api/http/dto/contact-confirmation-verify.dto';
+import { TwoFactorChallengeDto } from '@modules/auth/api/http/dto/two-factor-challenge.dto';
+import { TwoFactorVerifyDto } from '@modules/auth/api/http/dto/two-factor-verify.dto';
 import {
   Body,
   Controller,
@@ -13,6 +18,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -50,6 +56,19 @@ export class AuthController {
     const forwardedRaw = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
     const firstForwardedIp = forwardedRaw?.split(',')[0]?.trim();
     return firstForwardedIp || request.ip;
+  }
+
+  private getAccessToken(request: Request): string | undefined {
+    const authorization = request.headers.authorization;
+    if (!authorization) {
+      return undefined;
+    }
+
+    const [type, token] = authorization.split(' ');
+    if (type?.toLowerCase() !== 'bearer' || !token) {
+      return undefined;
+    }
+    return token;
   }
 
   @Post('register')
@@ -101,6 +120,69 @@ export class AuthController {
       deviceLocation: this.getDeviceLocation(request),
       ipAddress: this.getIpAddress(request),
       userAgent: Array.isArray(userAgent) ? userAgent.join(', ') : userAgent,
+    });
+  }
+
+  @Get('confirm-email')
+  @HttpCode(200)
+  async confirmEmail(@Query() query: ConfirmEmailDto, @Req() request: Request) {
+    const userAgent = request.headers['user-agent'];
+    return this.authService.confirmEmailByToken(
+      query.token,
+      {
+        deviceId: this.getDeviceId(request),
+        deviceName: this.getDeviceName(request),
+        deviceLocation: this.getDeviceLocation(request),
+        ipAddress: this.getIpAddress(request),
+        userAgent: Array.isArray(userAgent) ? userAgent.join(', ') : userAgent,
+      },
+      this.getAccessToken(request),
+    );
+  }
+
+  @Post('2fa/challenge')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  async requestTwoFactorChallenge(@Req() request: Request, @Body() body: TwoFactorChallengeDto) {
+    return this.authService.requestTwoFactorChallenge(this.getAuthContext(request), {
+      purpose: body.purpose,
+    });
+  }
+
+  @Post('2fa/verify')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  async verifyTwoFactorChallenge(@Req() request: Request, @Body() body: TwoFactorVerifyDto) {
+    return this.authService.verifyTwoFactorChallenge(this.getAuthContext(request), {
+      challengeId: body.challengeId,
+      code: body.code,
+      purpose: body.purpose,
+    });
+  }
+
+  @Post('contact-confirmation/challenge')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  async requestContactConfirmationChallenge(
+    @Req() request: Request,
+    @Body() body: ContactConfirmationChallengeDto,
+  ) {
+    return this.authService.requestContactConfirmationChallenge(this.getAuthContext(request), {
+      method: body.method,
+    });
+  }
+
+  @Post('contact-confirmation/verify')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  async verifyContactConfirmation(
+    @Req() request: Request,
+    @Body() body: ContactConfirmationVerifyDto,
+  ) {
+    return this.authService.verifyContactConfirmationCode(this.getAuthContext(request), {
+      challengeId: body.challengeId,
+      code: body.code,
+      method: body.method,
     });
   }
 

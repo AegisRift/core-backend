@@ -21,6 +21,22 @@ export const envConfig = registerAs('env', () => ({
     refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL_SECONDS ?? 2592000),
     seedUserEmail: process.env.SEED_USER_EMAIL ?? 'admin@keuwo.local',
     seedUserPassword: process.env.SEED_USER_PASSWORD ?? 'Admin1234!',
+    twoFactorCodeTtlSeconds: Number(process.env.TWO_FA_CODE_TTL_SECONDS ?? 300),
+    twoFactorVerificationTokenTtlSeconds: Number(
+      process.env.TWO_FA_VERIFICATION_TOKEN_TTL_SECONDS ?? 600,
+    ),
+    twoFactorMaxAttempts: Number(process.env.TWO_FA_MAX_ATTEMPTS ?? 5),
+    emailVerificationTokenTtlSeconds: Number(
+      process.env.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS ?? 86400,
+    ),
+    twoFactorTokenSecret:
+      process.env.TWO_FA_TOKEN_SECRET ?? process.env.ACCESS_TOKEN_SECRET ?? 'change-me-two-fa',
+  },
+  notifications: {
+    resendApiKey: process.env.RESEND_API_KEY ?? '',
+    resendFromEmail: process.env.RESEND_FROM_EMAIL ?? 'Keuwo <no-reply@keuwo.local>',
+    frontendVerifyEmailUrl:
+      process.env.FRONTEND_VERIFY_EMAIL_URL ?? 'http://localhost:3001/confirm-email',
   },
   storage: {
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',

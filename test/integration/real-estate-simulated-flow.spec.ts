@@ -5,6 +5,7 @@ import { envConfig } from '../../src/config/env.config';
 import { AuthService } from '../../src/modules/auth/application/auth.service';
 import { ListingsService } from '../../src/modules/listings/application/listings.service';
 import { PropertiesService } from '../../src/modules/properties/application/properties.service';
+import { NotificationsService } from '../../src/modules/notifications/application/notifications.service';
 
 describe('Real estate simulated flow', () => {
   it('registra dos usuarios y el segundo encuentra el listing en su feed', async () => {
@@ -149,6 +150,7 @@ describe('Real estate simulated flow', () => {
           return user;
         },
       ),
+      createEmailVerificationToken: jest.fn(async () => undefined),
     };
 
     const propertiesRepository = {
@@ -343,7 +345,17 @@ describe('Real estate simulated flow', () => {
       }),
     };
 
-    const authService = new AuthService(new JwtService(), authRepository as never, envConfig());
+    const notificationsService = {
+      sendEmailConfirmation: jest.fn(async () => undefined),
+      sendTwoFactorCodeByEmail: jest.fn(async () => undefined),
+      sendTwoFactorCodeByPhone: jest.fn(async () => undefined),
+    } as unknown as NotificationsService;
+    const authService = new AuthService(
+      new JwtService(),
+      authRepository as never,
+      notificationsService,
+      envConfig(),
+    );
     const propertiesService = new PropertiesService(propertiesRepository as never);
     const listingsService = new ListingsService(listingsRepository as never);
 
